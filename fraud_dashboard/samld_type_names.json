@@ -1,0 +1,12 @@
+{
+  "0": "Behavioural_Change_1",
+  "1": "Behavioural_Change_2",
+  "2": "Deposit-Send",
+  "3": "Gather-Scatter",
+  "4": "Layered_Fan_In",
+  "5": "Layered_Fan_Out",
+  "6": "Single_large",
+  "7": "Stacked Bipartite",
+  "8": "Structuring",
+  "9": "Other"
+}

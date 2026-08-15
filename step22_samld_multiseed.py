@@ -1,0 +1,340 @@
+# """
+# فاز سه — پروتکل استاندارد پنج seed روی SAML-D، بعد از رفع باگ فیچر
+# =====================================================================
+# حالا که باگ cold-start حل شده و baseline جدولی نشون داد GraphSAGE
+# واقعاً سیگنال داره، وقتشه دقیقاً همون انضباطی که برای Elliptic
+# داشتیم رو این‌جا هم اعمال کنیم: نتیجه تک-seed رو باور نکنیم، پنج بار
+# با seed های مختلف تکرار کنیم و میانگین و انحراف معیار بگیریم.
+# """
+#
+# import random
+# from collections import defaultdict
+#
+# import torch
+# import torch.nn as nn
+# import torch.nn.functional as F
+# from torch_geometric.nn import SAGEConv
+# from metrics_utils import evaluate_binary, find_best_threshold, run_multi_seed, set_seed
+#
+# # DATA_PATH = "samld_processed.pt"
+# DATA_PATH = "samld_processed_v3.pt"
+# S1, S2 = 25, 10
+# BATCH_SIZE = 256
+# WEIGHT_CAP = 30.0
+# EPOCHS = 20
+# SEEDS = (42, 1, 7, 123, 2024)  # همون پنج seed همیشگی پروژه
+#
+# print("در حال بارگذاری داده پردازش‌شده SAML-D...")
+# data_dict = torch.load(DATA_PATH, weights_only=False)
+# x = data_dict["x"]
+# edge_index = data_dict["edge_index"]
+# y = data_dict["y_binary"]
+# train_mask = data_dict["train_mask"]
+# val_mask = data_dict["val_mask"]
+# test_mask = data_dict["test_mask"]
+#
+# n_pos = (y[train_mask] == 1).sum().item()
+# n_neg = (y[train_mask] == 0).sum().item()
+# raw_weight = n_neg / max(n_pos, 1)
+# class_weight = torch.tensor([1.0, min(raw_weight, WEIGHT_CAP)])
+# print(f"Train: {train_mask.sum().item()}   Val: {val_mask.sum().item()}   Test: {test_mask.sum().item()}")
+# print(f"illicit در test: {y[test_mask].sum().item()}   وزن اعمال‌شده: {class_weight[1].item():.2f}")
+#
+# adjacency = defaultdict(list)
+# for s, d in zip(edge_index[0].tolist(), edge_index[1].tolist()):
+#     adjacency[d].append(s)
+#
+#
+# def sample_k(neighbors, k):
+#     return neighbors if len(neighbors) <= k else random.sample(neighbors, k)
+#
+#
+# def build_batch_subgraph(seed_nodes):
+#     hop1_of, all_hop1 = {}, set()
+#     for s in seed_nodes:
+#         neighs = sample_k(adjacency.get(s, []), S1)
+#         hop1_of[s] = neighs
+#         all_hop1.update(neighs)
+#
+#     hop2_of, all_hop2 = {}, set()
+#     for n in all_hop1:
+#         neighs = sample_k(adjacency.get(n, []), S2)
+#         hop2_of[n] = neighs
+#         all_hop2.update(neighs)
+#
+#     all_nodes = list(set(seed_nodes) | all_hop1 | all_hop2)
+#     local_id = {n: i for i, n in enumerate(all_nodes)}
+#
+#     edges_src, edges_dst = [], []
+#     for s in seed_nodes:
+#         for n in hop1_of[s]:
+#             edges_src.append(local_id[n]); edges_dst.append(local_id[s])
+#     for n in all_hop1:
+#         for n2 in hop2_of[n]:
+#             edges_src.append(local_id[n2]); edges_dst.append(local_id[n])
+#
+#     node_idx_tensor = torch.tensor(all_nodes, dtype=torch.long)
+#     sub_x = x[node_idx_tensor]
+#     sub_edge_index = (torch.zeros((2, 0), dtype=torch.long) if not edges_src
+#                        else torch.tensor([edges_src, edges_dst], dtype=torch.long))
+#     seed_local_idx = torch.tensor([local_id[s] for s in seed_nodes], dtype=torch.long)
+#     return sub_x, sub_edge_index, seed_local_idx
+#
+#
+# class StructuralOnlyGraphSAGE(nn.Module):
+#     def __init__(self, in_channels, hidden_channels, out_channels):
+#         super().__init__()
+#         self.conv1 = SAGEConv(in_channels, hidden_channels)
+#         self.conv2 = SAGEConv(hidden_channels, hidden_channels)
+#         self.classifier = nn.Linear(hidden_channels, out_channels)
+#
+#     def forward(self, x, edge_index):
+#         h = F.dropout(F.relu(self.conv1(x, edge_index)), p=0.3, training=self.training)
+#         h = F.dropout(F.relu(self.conv2(h, edge_index)), p=0.3, training=self.training)
+#         return self.classifier(h)
+#
+#
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# print(f"Using device: {device}")
+# train_node_ids_master = train_mask.nonzero(as_tuple=True)[0].tolist()
+#
+#
+# def run_one_seed(seed):
+#     set_seed(seed)
+#     random.seed(seed)
+#     train_node_ids = list(train_node_ids_master)
+#
+#     model = StructuralOnlyGraphSAGE(in_channels=x.shape[1], hidden_channels=64, out_channels=2).to(device)
+#     optimizer = torch.optim.AdamW(model.parameters(), lr=0.005, weight_decay=5e-4)
+#     criterion = nn.CrossEntropyLoss(weight=class_weight.to(device))
+#
+#     for epoch in range(1, EPOCHS + 1):
+#         random.shuffle(train_node_ids)
+#         model.train()
+#         for i in range(0, len(train_node_ids), BATCH_SIZE):
+#             seed_nodes = train_node_ids[i:i + BATCH_SIZE]
+#             sub_x, sub_edge_index, seed_local_idx = build_batch_subgraph(seed_nodes)
+#             sub_x, sub_edge_index = sub_x.to(device), sub_edge_index.to(device)
+#             seed_local_idx = seed_local_idx.to(device)
+#             batch_y = y[seed_nodes].to(device)
+#
+#             optimizer.zero_grad()
+#             out = model(sub_x, sub_edge_index)
+#             loss = criterion(out[seed_local_idx], batch_y)
+#             loss.backward()
+#             optimizer.step()
+#
+#     model.eval()
+#     with torch.no_grad():
+#         out = model(x.to(device), edge_index.to(device))
+#         probs_all = F.softmax(out, dim=1)[:, 1].cpu().numpy()
+#
+#     y_val = y[val_mask].numpy()
+#     probs_val = probs_all[val_mask.numpy()]
+#     best_t, _ = find_best_threshold(y_val, probs_val)
+#
+#     y_test = y[test_mask].numpy()
+#     probs_test = probs_all[test_mask.numpy()]
+#     preds_test = (probs_test >= best_t).astype(int)
+#
+#     metrics = evaluate_binary("SAML-D GraphSAGE", y_test, preds_test, probs_test, verbose=False)
+#     metrics["threshold"] = best_t
+#     return metrics
+#
+#
+# print("\nهر seed روی این مقیاس ممکنه چند دقیقه طول بکشه؛ پنج‌تاست، پس صبور باش.")
+# df, summary = run_multi_seed(run_one_seed, seeds=SEEDS, name="SAML-D GraphSAGE، یک میلیون ردیف")
+#
+# print("\n\n=== مقایسه نهایی با baseline جدولی ===")
+# print(f"{'Logistic Regression، بدون گراف':32s} PR-AUC=0.0063   F1=0.0465   AUC=0.7278")
+# print(f"{'Random Forest، بدون گراف':32s} PR-AUC=0.0029   F1=0.0244   AUC=0.5465")
+# print(f"{'GraphSAGE، میانگین پنج seed':32s} "
+#       f"PR-AUC={summary.loc['mean','PR-AUC']:.4f}±{summary.loc['std','PR-AUC']:.4f}   "
+#       f"F1={summary.loc['mean','F1']:.4f}±{summary.loc['std','F1']:.4f}   "
+#       f"AUC={summary.loc['mean','AUC']:.4f}±{summary.loc['std','AUC']:.4f}")
+
+
+"""
+فاز سه — پروتکل استاندارد پنج seed روی SAML-D، بعد از رفع باگ فیچر
+=====================================================================
+حالا که باگ cold-start حل شده و baseline جدولی نشون داد GraphSAGE
+واقعاً سیگنال داره، وقتشه دقیقاً همون انضباطی که برای Elliptic
+داشتیم رو این‌جا هم اعمال کنیم: نتیجه تک-seed رو باور نکنیم، پنج بار
+با seed های مختلف تکرار کنیم و میانگین و انحراف معیار بگیریم.
+
+تغییر نسبت به نسخه قبلی: هر seed حالا checkpoint خودش رو ذخیره می‌کنه
+(samld_seed_<seed>.pt)، دقیقاً همون کاری که Step17 برای Elliptic کرد،
+فقط برای هر پنج seed به‌جای فقط بهترین‌شون -- چون این چک‌پوینت‌ها بعداً
+توسط step25 (طبقه‌بندی نوع پول‌شویی) لود می‌شن و به‌خاطر پروتکل استاندارد
+پروژه، همه‌ی پنج seed باید در دسترس باشن، نه فقط یکی انتخابی.
+"""
+
+import random
+from collections import defaultdict
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch_geometric.nn import SAGEConv
+from metrics_utils import evaluate_binary, find_best_threshold, run_multi_seed, set_seed, save_checkpoint
+
+# DATA_PATH = "samld_processed.pt"
+DATA_PATH = "samld_processed_v3.pt"
+S1, S2 = 25, 10
+BATCH_SIZE = 256
+WEIGHT_CAP = 30.0
+EPOCHS = 20
+SEEDS = (42, 1, 7, 123, 2024)  # همون پنج seed همیشگی پروژه
+CHECKPOINT_PATTERN = "samld_seed_{seed}.pt"  # جدید: یک چک‌پوینت به‌ازای هر seed
+
+print("در حال بارگذاری داده پردازش‌شده SAML-D...")
+data_dict = torch.load(DATA_PATH, weights_only=False)
+x = data_dict["x"]
+edge_index = data_dict["edge_index"]
+y = data_dict["y_binary"]
+train_mask = data_dict["train_mask"]
+val_mask = data_dict["val_mask"]
+test_mask = data_dict["test_mask"]
+
+n_pos = (y[train_mask] == 1).sum().item()
+n_neg = (y[train_mask] == 0).sum().item()
+raw_weight = n_neg / max(n_pos, 1)
+class_weight = torch.tensor([1.0, min(raw_weight, WEIGHT_CAP)])
+print(f"Train: {train_mask.sum().item()}   Val: {val_mask.sum().item()}   Test: {test_mask.sum().item()}")
+print(f"illicit در test: {y[test_mask].sum().item()}   وزن اعمال‌شده: {class_weight[1].item():.2f}")
+
+adjacency = defaultdict(list)
+for s, d in zip(edge_index[0].tolist(), edge_index[1].tolist()):
+    adjacency[d].append(s)
+
+
+def sample_k(neighbors, k):
+    return neighbors if len(neighbors) <= k else random.sample(neighbors, k)
+
+
+def build_batch_subgraph(seed_nodes):
+    hop1_of, all_hop1 = {}, set()
+    for s in seed_nodes:
+        neighs = sample_k(adjacency.get(s, []), S1)
+        hop1_of[s] = neighs
+        all_hop1.update(neighs)
+
+    hop2_of, all_hop2 = {}, set()
+    for n in all_hop1:
+        neighs = sample_k(adjacency.get(n, []), S2)
+        hop2_of[n] = neighs
+        all_hop2.update(neighs)
+
+    all_nodes = list(set(seed_nodes) | all_hop1 | all_hop2)
+    local_id = {n: i for i, n in enumerate(all_nodes)}
+
+    edges_src, edges_dst = [], []
+    for s in seed_nodes:
+        for n in hop1_of[s]:
+            edges_src.append(local_id[n]); edges_dst.append(local_id[s])
+    for n in all_hop1:
+        for n2 in hop2_of[n]:
+            edges_src.append(local_id[n2]); edges_dst.append(local_id[n])
+
+    node_idx_tensor = torch.tensor(all_nodes, dtype=torch.long)
+    sub_x = x[node_idx_tensor]
+    sub_edge_index = (torch.zeros((2, 0), dtype=torch.long) if not edges_src
+                       else torch.tensor([edges_src, edges_dst], dtype=torch.long))
+    seed_local_idx = torch.tensor([local_id[s] for s in seed_nodes], dtype=torch.long)
+    return sub_x, sub_edge_index, seed_local_idx
+
+
+class StructuralOnlyGraphSAGE(nn.Module):
+    def __init__(self, in_channels, hidden_channels, out_channels):
+        super().__init__()
+        self.conv1 = SAGEConv(in_channels, hidden_channels)
+        self.conv2 = SAGEConv(hidden_channels, hidden_channels)
+        self.classifier = nn.Linear(hidden_channels, out_channels)
+
+    def forward(self, x, edge_index, return_embeddings=False):
+        # تغییر: پارامتر return_embeddings اضافه شد، دقیقاً مثل نسخه Elliptic در Step17،
+        # تا step25 بتونه بعداً h2 رو برای طبقه‌بندی نوع بردارد.
+        h1 = F.dropout(F.relu(self.conv1(x, edge_index)), p=0.3, training=self.training)
+        h2 = F.dropout(F.relu(self.conv2(h1, edge_index)), p=0.3, training=self.training)
+        out = self.classifier(h2)
+        if return_embeddings:
+            return out, h1, h2
+        return out
+
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+train_node_ids_master = train_mask.nonzero(as_tuple=True)[0].tolist()
+
+
+def run_one_seed(seed):
+    set_seed(seed)
+    random.seed(seed)
+    train_node_ids = list(train_node_ids_master)
+
+    model = StructuralOnlyGraphSAGE(in_channels=x.shape[1], hidden_channels=64, out_channels=2).to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.005, weight_decay=5e-4)
+    criterion = nn.CrossEntropyLoss(weight=class_weight.to(device))
+
+    for epoch in range(1, EPOCHS + 1):
+        random.shuffle(train_node_ids)
+        model.train()
+        for i in range(0, len(train_node_ids), BATCH_SIZE):
+            seed_nodes = train_node_ids[i:i + BATCH_SIZE]
+            sub_x, sub_edge_index, seed_local_idx = build_batch_subgraph(seed_nodes)
+            sub_x, sub_edge_index = sub_x.to(device), sub_edge_index.to(device)
+            seed_local_idx = seed_local_idx.to(device)
+            batch_y = y[seed_nodes].to(device)
+
+            optimizer.zero_grad()
+            out = model(sub_x, sub_edge_index)
+            loss = criterion(out[seed_local_idx], batch_y)
+            loss.backward()
+            optimizer.step()
+
+    model.eval()
+    with torch.no_grad():
+        out = model(x.to(device), edge_index.to(device))
+        probs_all = F.softmax(out, dim=1)[:, 1].cpu().numpy()
+
+    y_val = y[val_mask].numpy()
+    probs_val = probs_all[val_mask.numpy()]
+    best_t, _ = find_best_threshold(y_val, probs_val)
+
+    y_test = y[test_mask].numpy()
+    probs_test = probs_all[test_mask.numpy()]
+    preds_test = (probs_test >= best_t).astype(int)
+
+    metrics = evaluate_binary("SAML-D GraphSAGE", y_test, preds_test, probs_test, verbose=False)
+    metrics["threshold"] = best_t
+
+    # جدید: ذخیره چک‌پوینت این seed، قبل از return -- دقیقاً همون الگوی Step17،
+    # فقط اینجا برای هر پنج seed، نه فقط بهترین.
+    save_checkpoint(
+        model, CHECKPOINT_PATTERN.format(seed=seed),
+        extra={
+            "seed": seed,
+            "F1": metrics["F1"],
+            "threshold": float(best_t),
+            "hidden_channels": 64,
+            "lr": 0.005,
+            "in_channels": x.shape[1],
+        },
+    )
+
+    return metrics
+
+
+print("\nهر seed روی این مقیاس ممکنه چند دقیقه طول بکشه؛ پنج‌تاست، پس صبور باش.")
+df, summary = run_multi_seed(run_one_seed, seeds=SEEDS, name="SAML-D GraphSAGE، یک میلیون ردیف")
+
+print("\n\n=== مقایسه نهایی با baseline جدولی ===")
+print(f"{'Logistic Regression، بدون گراف':32s} PR-AUC=0.0063   F1=0.0465   AUC=0.7278")
+print(f"{'Random Forest، بدون گراف':32s} PR-AUC=0.0029   F1=0.0244   AUC=0.5465")
+print(f"{'GraphSAGE، میانگین پنج seed':32s} "
+      f"PR-AUC={summary.loc['mean','PR-AUC']:.4f}±{summary.loc['std','PR-AUC']:.4f}   "
+      f"F1={summary.loc['mean','F1']:.4f}±{summary.loc['std','F1']:.4f}   "
+      f"AUC={summary.loc['mean','AUC']:.4f}±{summary.loc['std','AUC']:.4f}")
+
+print(f"\nپنج چک‌پوینت ذخیره شدن: {[CHECKPOINT_PATTERN.format(seed=s) for s in SEEDS]}")
+print("این‌ها رو step25_samld_type_classification.py برای طبقه‌بندی نوع بارگذاری می‌کنه.")

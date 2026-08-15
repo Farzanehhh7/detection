@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>{% block title %}داشبورد تشخیص پول‌شویی{% endblock %}</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/standalone/umd/vis-network.min.js"></script>
+<style>
+  body { font-family: Tahoma, sans-serif; background: #f4f5f7; margin: 0; padding: 0; }
+  header { background: #1f2937; color: white; padding: 16px 24px; }
+  header h1 { margin: 0; font-size: 20px; }
+  .container { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+  table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  th, td { padding: 10px 12px; text-align: right; border-bottom: 1px solid #e5e7eb; font-size: 14px; }
+  th { background: #f9fafb; }
+  tr:hover { background: #f9fafb; }
+  .badge { padding: 3px 8px; border-radius: 10px; font-size: 12px; color: white; }
+  .badge-high { background: #dc2626; }
+  .badge-mid { background: #f59e0b; }
+  .stat-box { display: inline-block; background: white; padding: 14px 20px; margin-left: 12px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .stat-box .num { font-size: 22px; font-weight: bold; }
+  .stat-box .lbl { font-size: 12px; color: #6b7280; }
+  a { color: #2563eb; text-decoration: none; }
+  select { padding: 6px; margin-left: 8px; }
+  .network-box { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-top: 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>داشبورد تشخیص پول‌شویی — SAML-D</h1>
+  <a href="{% url 'detector:upload' %}" style="color:#93c5fd; font-size:14px;">+ اجرا روی داده‌ی جدید</a>
+</header>
+<div class="container">
+{% block content %}{% endblock %}
+</div>
+</body>
+</html>

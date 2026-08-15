@@ -1,0 +1,73 @@
+{% extends "detector/base.html" %}
+{% block content %}
+
+<div>
+  <div class="stat-box"><div class="num">{{ total_accounts }}</div><div class="lbl">کل حساب‌های وارد‌شده</div></div>
+  <div class="stat-box"><div class="num">{{ total_flagged }}</div><div class="lbl">حساب‌های پرچم‌خورده</div></div>
+  <div class="stat-box"><div class="num">{{ run.name|truncatechars:30 }}</div><div class="lbl">اجرای فعال</div></div>
+</div>
+
+<h2 style="margin-top:28px;">شبکه‌ی روابط بین حساب‌های پرچم‌خورده</h2>
+<p style="color:#6b7280; font-size:14px;">هر گره یک حساب مشکوک است؛ یال‌ها تراکنش‌های واقعی بین آن‌ها را نشان می‌دهند. قرمز = واقعاً illicit، نارنجی = پیش‌بینی‌شده illicit ولی برچسب واقعی licit.</p>
+<div class="network-box">
+  <div id="network" style="height: 480px;"></div>
+</div>
+
+<h2 style="margin-top:28px;">فهرست حساب‌های پرچم‌خورده</h2>
+<form method="get" style="margin-bottom:12px;">
+  <label>خانواده:
+    <select name="family" onchange="this.form.submit()">
+      <option value="">همه</option>
+      {% for f in families %}
+        <option value="{{ f }}" {% if f == selected_family %}selected{% endif %}>{{ f }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>نوع دقیق:
+    <select name="type" onchange="this.form.submit()">
+      <option value="">همه</option>
+      {% for t in types %}
+        <option value="{{ t }}" {% if t == selected_type %}selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
+  </label>
+</form>
+
+<table>
+<tr><th>شناسه حساب</th><th>P(illicit)</th><th>نوع دقیق</th><th>خانواده</th><th>برچسب واقعی</th><th></th></tr>
+{% for acc in accounts %}
+<tr>
+  <td>{{ acc.node_id }}</td>
+  <td>
+    {% if acc.prob_illicit > 0.7 %}<span class="badge badge-high">{{ acc.prob_illicit|floatformat:3 }}</span>
+    {% else %}<span class="badge badge-mid">{{ acc.prob_illicit|floatformat:3 }}</span>{% endif %}
+  </td>
+  <td>{{ acc.predicted_type|default:"—" }}</td>
+  <td>{{ acc.predicted_family|default:"—" }}</td>
+  <td>{% if acc.actual_label == 1 %}illicit{% else %}licit{% endif %}</td>
+  <td><a href="{% url 'detector:account_detail' run.id acc.node_id %}">جزئیات و دلیل ←</a></td>
+</tr>
+{% endfor %}
+</table>
+
+<script>
+fetch("{% url 'detector:flagged_network_json' run.id %}")
+  .then(r => r.json())
+  .then(data => {
+    const nodes = new vis.DataSet(data.nodes);
+    const edges = new vis.DataSet(data.edges);
+    const container = document.getElementById("network");
+    const network = new vis.Network(container, {nodes, edges}, {
+      nodes: { shape: "dot", size: 10, font: { size: 0 } },
+      edges: { arrows: "to", color: { color: "#c7cdd6" }, width: 1 },
+      physics: { stabilization: true, barnesHut: { gravitationalConstant: -3000 } },
+      interaction: { hover: true },
+    });
+    network.on("click", function(params) {
+      if (params.nodes.length > 0) {
+        window.location.href = "/run/{{ run.id }}/account/" + params.nodes[0] + "/";
+      }
+    });
+  });
+</script>
+{% endblock %}

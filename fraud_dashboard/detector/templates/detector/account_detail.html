@@ -1,0 +1,63 @@
+{% extends "detector/base.html" %}
+{% block content %}
+
+<p><a href="{% url 'detector:dashboard_home' %}">← بازگشت به فهرست</a></p>
+
+<h2>حساب #{{ account.node_id }}</h2>
+<div class="stat-box"><div class="num">{{ account.prob_illicit|floatformat:3 }}</div><div class="lbl">احتمال illicit</div></div>
+<div class="stat-box"><div class="num">{{ account.predicted_type|default:"—" }}</div><div class="lbl">نوع دقیق</div></div>
+<div class="stat-box"><div class="num">{{ account.predicted_family|default:"—" }}</div><div class="lbl">خانواده</div></div>
+<div class="stat-box"><div class="num">{% if account.actual_label == 1 %}illicit{% else %}licit{% endif %}</div><div class="lbl">برچسب واقعی</div></div>
+
+<h3 style="margin-top:24px;">چرا این حساب مشکوکه: فیچرهای خودِ حساب</h3>
+<table>
+<tr><th>فیچر</th><th>مقدار</th><th>سهم در تصمیم</th></tr>
+{% for attr in attributions %}
+<tr>
+  <td>{{ attr.feature_name }}</td>
+  <td>{{ attr.value|floatformat:3 }}</td>
+  <td style="color: {% if attr.attribution > 0 %}#dc2626{% else %}#2563eb{% endif %};">{{ attr.attribution|floatformat:4 }}</td>
+</tr>
+{% empty %}
+<tr><td colspan="3">برای این حساب توضیح فیچر محاسبه نشده (فقط برای بالاترین حساب‌های پرچم‌خورده محاسبه شده).</td></tr>
+{% endfor %}
+</table>
+
+<h3 style="margin-top:24px;">همسایه‌های موثر (تا ۲ گام دورتر)</h3>
+<table>
+<tr><th>شناسه همسایه</th><th>میزان اثر</th><th>برچسب همسایه</th></tr>
+{% for n in neighbor_influences %}
+<tr>
+  <td><a href="{% url 'detector:account_detail' run.id n.neighbor_node_id %}">#{{ n.neighbor_node_id }}</a></td>
+  <td>{{ n.influence|floatformat:4 }}</td>
+  <td>{% if n.neighbor_is_flagged %}<span class="badge badge-high">illicit</span>{% else %}licit{% endif %}</td>
+</tr>
+{% empty %}
+<tr><td colspan="3">همسایه‌ی موثری در محاسبه یافت نشد (یا این حساب جزو نمونه‌ی توضیح‌داده‌شده نیست).</td></tr>
+{% endfor %}
+</table>
+
+<h3 style="margin-top:24px;">نمای گراف همسایگی</h3>
+<div class="network-box">
+  <div id="network" style="height: 400px;"></div>
+</div>
+
+<script>
+fetch("{% url 'detector:account_graph_json' run.id account.node_id %}")
+  .then(r => r.json())
+  .then(data => {
+    const nodes = new vis.DataSet(data.nodes.map(n => ({
+      ...n,
+      size: n.isCenter ? 22 : 12,
+      borderWidth: n.isCenter ? 3 : 1,
+    })));
+    const edges = new vis.DataSet(data.edges);
+    const container = document.getElementById("network");
+    new vis.Network(container, {nodes, edges}, {
+      nodes: { shape: "dot", font: { size: 12 } },
+      edges: { arrows: "to", color: { color: "#c7cdd6" } },
+      physics: { stabilization: true },
+    });
+  });
+</script>
+{% endblock %}
