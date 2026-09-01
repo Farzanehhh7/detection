@@ -1,35 +1,17 @@
-"""
-strip_comments.py
-
-پاک‌سازی امن کامنت‌های '#' از فایل‌های پایتون با استفاده از ماژول tokenize.
-چون tokenize دقیقاً '#' های واقعی رو از رشته‌ها (مثلاً "این یه # داخل استرینگه")
-تشخیص می‌ده، بر خلاف regex ساده هیچ‌وقت محتوای رشته‌ها رو خراب نمی‌کنه.
-
-Docstring ها (رشته‌های سه‌گانه‌ی ابتدای فایل/تابع/کلاس) به‌صورت پیش‌فرض
-دست‌نخورده می‌مونن، چون از نظر پایتون رشته‌ان نه کامنت — و معمولاً همون
-مستندسازی‌ای هستن که برای نوشتن پایان‌نامه لازمشون داری.
-اگه واقعاً می‌خوای اون‌ها هم پاک بشن: --strip-docstrings
-
-Usage:
-    python strip_comments.py <file_or_directory> [--strip-docstrings] [--dry-run]
-
-Examples:
-    python strip_comments.py src/ --dry-run          # فقط پیش‌نمایش، چیزی نمی‌نویسه
-    python strip_comments.py src/                     # پاک‌سازی واقعی و recursive
-    python strip_comments.py model.py --strip-docstrings
-"""
 
 import argparse
 import io
 import tokenize
 from pathlib import Path
 
+EXCLUDE_DIRS = {".venv", "venv", "env", ".git", "__pycache__", "node_modules", ".idea"}
+
 
 def strip_comments_from_source(source: str, strip_docstrings: bool = False) -> str:
     lines = source.splitlines(keepends=True)
     tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
 
-    edits = []  # (row, col_start, col_end) بازه‌هایی که باید خالی بشن
+    edits = []
     prev_toktype = tokenize.NEWLINE
 
     for tok in tokens:
@@ -65,8 +47,6 @@ def strip_comments_from_source(source: str, strip_docstrings: bool = False) -> s
             line = line[:col_start] + line[col_end:]
         new_lines[row - 1] = line
 
-    # خط‌هایی که فقط کامنت بودن الان خالی‌ان — به‌جای حذف کامل (که شماره‌ی خط‌ها رو
-    # به‌هم می‌ریزه)، فقط به یک خط خالی تبدیل‌شون می‌کنیم
     result_lines = []
     for line in new_lines:
         if line.strip() == "":
@@ -96,6 +76,17 @@ def process_file(path: Path, strip_docstrings: bool, dry_run: bool) -> None:
         print(f"پاک‌سازی شد: {path}")
 
 
+def find_python_files(target: Path) -> list[Path]:
+    if target.is_file():
+        return [target]
+    files = []
+    for f in target.rglob("*.py"):
+        if any(part in EXCLUDE_DIRS for part in f.parts):
+            continue
+        files.append(f)
+    return sorted(files)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("target", help="فایل یا پوشه‌ی پایتون")
@@ -105,13 +96,13 @@ def main() -> None:
                          help="فقط نشون بده چی تغییر می‌کنه، چیزی روی دیسک ننویس")
     args = parser.parse_args()
 
-    target = Path(args.target)
-    files = [target] if target.is_file() else sorted(target.rglob("*.py"))
+    files = find_python_files(Path(args.target))
 
     if not files:
         print("هیچ فایل .py پیدا نشد.")
         return
 
+    print(f"{len(files)} فایل پیدا شد.\n")
     for f in files:
         process_file(f, args.strip_docstrings, args.dry_run)
 
