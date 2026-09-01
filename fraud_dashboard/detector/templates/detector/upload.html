@@ -1,0 +1,11 @@
+{% extends "detector/base.html" %}
+{% block content %}
+<p><a href="{% url 'detector:dashboard_home' %}">← بازگشت به داشبورد</a></p>
+<h2>اجرای مدل روی داده‌ی جدید</h2>
+<p style="color:#6b7280; font-size:14px;">فایل CSV باید حداقل این ستون‌ها را داشته باشد: <code>Sender_account, Receiver_account, Amount, Payment_type</code></p>
+<form method="post" enctype="multipart/form-data" style="background:white; padding:20px; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+  {% csrf_token %}
+  <input type="file" name="csv_file" accept=".csv" required>
+  <button type="submit" style="margin-right:12px; padding:8px 20px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer;">شروع تحلیل</button>
+</form>
+{% endblock %}

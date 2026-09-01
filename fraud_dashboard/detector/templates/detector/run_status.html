@@ -1,0 +1,43 @@
+{% extends "detector/base.html" %}
+{% block content %}
+<h2>وضعیت تحلیل: {{ run.name }}</h2>
+<div style="background:white; padding:24px; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+  <div id="step-text" style="font-size:16px; margin-bottom:12px;">در حال شروع...</div>
+  <div style="background:#e5e7eb; border-radius:6px; height:20px; overflow:hidden;">
+    <div id="progress-bar" style="background:#2563eb; height:100%; width:0%; transition: width 0.4s;"></div>
+  </div>
+  <div id="pct-text" style="margin-top:8px; color:#6b7280; font-size:13px;">۰٪</div>
+  <div id="result-link" style="margin-top:20px;"></div>
+  <div id="error-box" style="margin-top:16px; color:#dc2626; white-space:pre-wrap; font-size:12px;"></div>
+</div>
+
+<script>
+const runId = {{ run.id }};
+function poll() {
+  fetch(`/run/${runId}/status.json`)
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById("step-text").innerText = data.current_step || "در حال پردازش...";
+      document.getElementById("progress-bar").style.width = data.progress_pct + "%";
+      document.getElementById("pct-text").innerText = data.progress_pct + "٪";
+      if (data.status === "done") {
+        document.getElementById("result-link").innerHTML =
+          `<a href="/?run=${runId}" style="color:#16a34a; font-weight:bold;">✓ تمام شد — مشاهده‌ی نتایج ←</a>`;
+        if (data.notes) {
+          document.getElementById("error-box").style.color = "#92400e";
+          document.getElementById("error-box").innerText = data.notes;
+        }
+        return;
+      }
+      if (data.status === "failed") {
+        document.getElementById("step-text").innerText = "خطا در پردازش";
+        document.getElementById("progress-bar").style.background = "#dc2626";
+        document.getElementById("error-box").innerText = data.notes;
+        return;
+      }
+      setTimeout(poll, 1500);
+    });
+}
+poll();
+</script>
+{% endblock %}
