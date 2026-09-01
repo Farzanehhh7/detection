@@ -2,3 +2,7 @@
 datasets/
 
 run_log.txt
+
+.idea/
+__pycache__/
+fraud_dashboard/db.sqlite3
